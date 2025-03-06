@@ -4,11 +4,15 @@ from rich.panel import Panel
 from rich.console import Console
 from rich.table import Table
 from rich.markdown import Markdown
-from .chat import interactive_chat, custom_theme
+from .chat import interactive_chat, custom_theme, is_jupyter, display_output
 from .config import get_config, update_config
 from .conversation import ConversationManager, Conversation
 
-console = Console(theme=custom_theme)
+# Create console with appropriate settings for environment
+if is_jupyter:
+    console = Console(theme=custom_theme, record=True)
+else:
+    console = Console(theme=custom_theme)
 
 # Create conversation manager at module level
 _conversation_manager = None
@@ -45,10 +49,11 @@ def cli():
 @click.option('--continue', 'continue_chat', help='Continue a previous conversation by title')
 def chat(model: Optional[str], theme: Optional[str], no_history: bool, continue_chat: Optional[str]):
     """Start an interactive chat session"""
-    console.print(Panel.fit(
+    welcome_panel = Panel.fit(
         "[bold]🚀 AI Chat Interface[/]\n[dim]Powered by Ollama & Rich[/]",
         style="bold yellow on dark_red"
-    ))
+    )
+    display_output(welcome_panel)
     
     if model or theme:
         updates = {}
@@ -62,10 +67,10 @@ def chat(model: Optional[str], theme: Optional[str], no_history: bool, continue_
     if continue_chat:
         initial_conversation = get_conversation_manager().load_conversation(continue_chat)
         if not initial_conversation:
-            console.print(f"[warning]Conversation '{continue_chat}' not found.[/]")
+            display_output(f"[warning]Conversation '{continue_chat}' not found.[/]")
             return
         
-        console.print(f"[green]Continuing conversation: {continue_chat}[/]")
+        display_output(f"[green]Continuing conversation: {continue_chat}[/]")
     
     interactive_chat(
         initial_conversation=initial_conversation,
@@ -86,12 +91,13 @@ def config(model: Optional[str], theme: Optional[str]):
         if theme:
             updates['code_theme'] = theme
         current_config = update_config(updates)
-        console.print("[green]Configuration updated successfully![/]")
+        display_output("[green]Configuration updated successfully![/]")
     
-    console.print(Panel.fit(
+    config_panel = Panel.fit(
         "\n".join([f"[cyan]{k}:[/] {v}" for k, v in current_config.items()]),
         title="[yellow]Current Configuration[/]"
-    ))
+    )
+    display_output(config_panel)
 
 @cli.group()
 def history():
@@ -104,7 +110,7 @@ def list_history():
     conversations = get_conversation_manager().list_conversations()
     
     if not conversations:
-        console.print("[yellow]No saved conversations found.[/]")
+        display_output("[yellow]No saved conversations found.[/]")
         return
     
     table = Table(
@@ -123,7 +129,7 @@ def list_history():
             conv["updated_at"]
         )
     
-    console.print(table)
+    display_output(table)
 
 @history.command()
 @click.argument('title')
@@ -131,18 +137,18 @@ def show(title: str):
     """Show a specific conversation"""
     conversation = get_conversation_manager().load_conversation(title)
     if not conversation:
-        console.print(f"[warning]Conversation '{title}' not found.[/]")
+        display_output(f"[warning]Conversation '{title}' not found.[/]")
         return
     
     for msg in conversation.messages:
         if msg["role"] == "user":
-            console.print(Panel.fit(
+            display_output(Panel.fit(
                 Markdown(msg["content"]),
                 title="[user]You[/]",
                 border_style="user"
             ))
         else:
-            console.print(Panel.fit(
+            display_output(Panel.fit(
                 Markdown(msg["content"]),
                 title="[assistant]AI Assistant[/]",
                 border_style="assistant"
@@ -153,9 +159,9 @@ def show(title: str):
 def delete(title: str):
     """Delete a conversation"""
     if get_conversation_manager().delete_conversation(title):
-        console.print(f"[green]Conversation '{title}' deleted successfully.[/]")
+        display_output(f"[green]Conversation '{title}' deleted successfully.[/]")
     else:
-        console.print(f"[warning]Conversation '{title}' not found.[/]")
+        display_output(f"[warning]Conversation '{title}' not found.[/]")
 
 def main():
     cli() 
