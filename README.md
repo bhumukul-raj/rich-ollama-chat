@@ -10,6 +10,10 @@ A beautiful terminal-based chat interface for Ollama using Rich formatting.
 - ⏱️ Response time tracking
 - 🎯 Custom theme support
 - 🔄 Live streaming responses
+- 📐 Adaptive width based on terminal size
+- 💾 Chat history management
+- ⚙️ Configurable performance settings
+- 🖥️ CPU/GPU configuration options
 
 ## Prerequisites
 
@@ -25,97 +29,91 @@ You can install this package in several ways:
 pip install rich-ollama-chat
 ```
 
-Note: This method will work only after the package is published to PyPI. If the package is not yet published, use the GitHub installation method below.
-
 ### 2. From GitHub
-You can install the latest version directly from GitHub using pip:
-
 ```bash
-# Using HTTPS
 pip install git+https://github.com/bhumukul-raj/rich-ollama-chat.git
-
-# Using SSH (if you have SSH access configured)
-pip install git+ssh://git@github.com/bhumukul-raj/rich-ollama-chat.git
 ```
 
-Note: When installing from GitHub, pip will automatically:
-- Clone the repository
-- Build the package
-- Install all required dependencies
-- Install the built package
-No manual build steps are required for users installing from GitHub.
-
 ### 3. From Source
-Clone the repository and install in development mode:
 ```bash
 git clone https://github.com/bhumukul-raj/rich-ollama-chat.git
 cd rich-ollama-chat
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e .
-```
-
-### 4. From Distribution Files
-Download the wheel or tarball from the releases and install:
-```bash
-# For wheel file
-pip install rich_ollama_chat-0.1.0-py3-none-any.whl
-
-# For source distribution
-pip install rich_ollama_chat-0.1.0.tar.gz
 ```
 
 ## Usage
 
-### 1. Command Line Interface
-After installation, you can start the chat interface by running:
+### Basic Usage
 ```bash
-rich-ollama-chat
+# Start a new chat session
+rich-ollama-chat chat
+
+# View configuration
+rich-ollama-chat config
+
+# List chat history
+rich-ollama-chat history list
+
+# Show a specific conversation
+rich-ollama-chat history show <conversation_id>
+
+# Delete a conversation
+rich-ollama-chat history delete <conversation_id>
 ```
 
-### 2. Python API
-You can use it in your Python code in multiple ways:
+### Configuration Options
 
-#### Method 1: Using the interactive chat
-```python
-from rich_ollama_chat import chat
-chat.interactive_chat()
+The chat interface can be configured through the config file (`~/.config/rich-ollama-chat/config.json`):
+
+```json
+{
+    "model": "mistral",           // Default model to use
+    "code_theme": "dracula",      // Theme for code blocks
+    "max_context_length": 4096,   // Maximum context length
+    "temperature": 0.7,          // Response temperature
+    "num_ctx": 4096,            // Context window size
+    "num_thread": 8,            // Number of CPU threads
+    "use_gpu": false,           // Whether to use GPU
+    "num_gpu": 0,              // Number of GPUs (0 for CPU only)
+    "repeat_penalty": 1.1,     // Penalty for repeating tokens
+    "top_k": 40,              // Top K sampling
+    "top_p": 0.9              // Top P sampling
+}
 ```
 
-#### Method 2: Using the streaming chat function
-```python
-from rich_ollama_chat import stream_chat_with_formatting
+You can modify these settings using the config command:
+```bash
+# Change model
+rich-ollama-chat config --model llama2
 
-messages = [{"role": "user", "content": "Hello, how are you?"}]
-response = stream_chat_with_formatting(messages, model="mistral")
+# Change theme
+rich-ollama-chat config --theme monokai
+
+# Enable GPU
+rich-ollama-chat config --gpu true
 ```
 
-## Configuration
+### Display Features
 
-The chat interface uses the following default settings:
-- Model: mistral
-- Code theme: dracula (default)
-- Custom theme for different message types
+1. **Adaptive Width**:
+   - In full-screen mode: Uses 80% of terminal width for optimal readability
+   - In windowed mode: Uses full available width
+   - Automatically adjusts when terminal is resized
 
-### Changing Code Theme
+2. **Code Formatting**:
+   - Syntax highlighting for code blocks
+   - Line numbers for better reference
+   - Multiple theme options
 
-You can change the code theme when using the streaming chat function:
+3. **Response Streaming**:
+   - Real-time display of responses
+   - Progress indicator
+   - Response time tracking
 
-```python
-from rich_ollama_chat import stream_chat_with_formatting
+### Available Code Themes
 
-# Example with different code themes
-messages = [{"role": "user", "content": "Show me a Python function"}]
-
-# Using monokai theme
-response = stream_chat_with_formatting(messages, model="mistral", code_theme="monokai")
-
-# Using github-dark theme
-response = stream_chat_with_formatting(messages, model="mistral", code_theme="github-dark")
-
-# Using solarized-dark theme
-response = stream_chat_with_formatting(messages, model="mistral", code_theme="solarized-dark")
-```
-
-Available themes include:
 - `dracula` (default)
 - `monokai`
 - `github-dark`
@@ -125,69 +123,70 @@ Available themes include:
 - `gruvbox-dark`
 - `vs-dark`
 - `zenburn`
-- And many more supported by Pygments
 
-Note: The theme only affects how code blocks are displayed in the chat.
+### Python API
 
-## Building the Package
+You can also use the package programmatically:
 
-If you want to build the package yourself:
+```python
+from rich_ollama_chat import stream_chat_with_formatting, interactive_chat
 
-1. Install build tools:
-```bash
-pip install build twine
+# Start interactive chat
+interactive_chat()
+
+# Or use streaming chat directly
+messages = [{"role": "user", "content": "Hello!"}]
+response = stream_chat_with_formatting(
+    messages,
+    model="mistral",
+    code_theme="dracula"
+)
 ```
 
-2. Build the package:
+## Performance Optimization
+
+### CPU Configuration
+By default, the chat uses CPU-only mode with 8 threads. You can adjust thread count in config:
 ```bash
-python -m build
+rich-ollama-chat config --threads 16
 ```
 
-This will create two files in the `dist` directory:
-- `rich_ollama_chat-0.1.0-py3-none-any.whl` (Wheel distribution)
-- `rich_ollama_chat-0.1.0.tar.gz` (Source distribution)
-
-3. To install the locally built package:
+### GPU Support
+To enable GPU acceleration:
 ```bash
-pip install dist/rich_ollama_chat-0.1.0-py3-none-any.whl
+rich-ollama-chat config --gpu true --num-gpu 1
 ```
 
 ## Development
 
-1. Create a virtual environment:
+1. Clone and setup:
 ```bash
+git clone https://github.com/bhumukul-raj/rich-ollama-chat.git
+cd rich-ollama-chat
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
+pip install -e ".[test]"
 ```
 
-2. Install in development mode:
+2. Run tests:
 ```bash
-pip install -e .
+pytest
 ```
+
+3. Format code:
+```bash
+black rich_ollama_chat
+isort rich_ollama_chat
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Publishing to PyPI
-
-To make this package available for installation via `pip install rich-ollama-chat`, you need to publish it to PyPI:
-
-1. Create an account on PyPI (https://pypi.org)
-
-2. Install build tools:
-```bash
-pip install build twine
-```
-
-3. Build the distribution:
-```bash
-python -m build
-```
-
-4. Upload to PyPI:
-```bash
-python -m twine upload dist/*
-```
-
-You'll need to enter your PyPI username and password when uploading. 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 

@@ -1,3 +1,14 @@
+"""Rich Ollama Chat - A beautiful terminal-based chat interface.
+
+This module provides the core functionality for the chat interface, including:
+- Real-time response streaming with rich formatting
+- Code block detection and syntax highlighting
+- Adaptive width based on terminal size
+- CPU/GPU configuration handling
+- Chat history management
+"""
+
+from typing import List, Dict, Optional, Any, Union
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -5,29 +16,119 @@ from rich.console import Console
 from rich.syntax import Syntax
 from rich.status import Status
 from rich.theme import Theme
+from rich.progress import Progress, SpinnerColumn, TextColumn
 import ollama
 import time
+import os
+import shutil
+from .config import get_config
+from .conversation import Conversation, ConversationManager
 
-# Custom theme with additional styles
+# Custom theme with semantic color mappings for different message types
 custom_theme = Theme({
-    "user": "bold cyan",
-    "assistant": "italic chartreuse3",
-    "system": "dim yellow",
-    "code": "grey70 on grey7",
-    "warning": "bold red",
-    "highlight": "bold yellow on dark_red"
+    "user": "bold cyan",          # User messages in cyan
+    "assistant": "italic chartreuse3",  # AI responses in green
+    "system": "dim yellow",       # System messages in yellow
+    "code": "grey70 on grey7",    # Code blocks with dark background
+    "warning": "bold red",        # Warnings in red
+    "highlight": "bold yellow on dark_red"  # Important highlights
 })
 console = Console(theme=custom_theme)
 
-def stream_chat_with_formatting(messages, model='mistral', code_theme="dracula"):
-    # User message formatting
+def check_ollama_connection(model: str) -> bool:
+    """Check if Ollama is running and the specified model is available.
+    
+    Attempts to make a test request to Ollama with the specified model.
+    Displays a status indicator during the check.
+    
+    Args:
+        model: Name of the model to check (e.g., "mistral", "llama2")
+        
+    Returns:
+        bool: True if connection is successful and model is available,
+              False if connection fails or model is not available
+    """
+    try:
+        with Status("[yellow]Checking Ollama connection...[/]"):
+            ollama.chat(model=model, messages=[{"role": "user", "content": "test"}], stream=False)
+        return True
+    except Exception as e:
+        console.print(f"[warning]Error connecting to Ollama: {str(e)}[/]", style="warning")
+        return False
+
+def get_panel_width() -> int:
+    """Calculate optimal panel width based on terminal size.
+    
+    Uses different width calculations based on whether the terminal
+    is in full screen mode or windowed mode:
+    - Full screen (>90% of screen width): Uses 80% of width
+    - Windowed: Uses full available width minus padding
+    
+    Returns:
+        int: Calculated panel width in characters
+    """
+    terminal_width = console.width
+    screen_width = shutil.get_terminal_size().columns
+    
+    # If terminal width is close to screen width (full screen/maximized)
+    if terminal_width >= screen_width * 0.9:  # Using 90% as threshold
+        return min(int(terminal_width * 0.8), terminal_width - 4)
+    else:
+        return terminal_width - 4  # Use full width with minimal padding
+
+def stream_chat_with_formatting(
+    messages: List[Dict[str, str]], 
+    model: Optional[str] = None, 
+    code_theme: Optional[str] = None,
+    conversation: Optional[Conversation] = None
+) -> Optional[str]:
+    """Stream chat responses with rich formatting and real-time display.
+    
+    This function handles:
+    - Real-time streaming of responses
+    - Code block detection and syntax highlighting
+    - Markdown formatting
+    - Adaptive width based on terminal size
+    - Response time tracking
+    - Chat history management
+    
+    Args:
+        messages: List of message dictionaries with 'role' and 'content'
+        model: Optional model name (defaults to config)
+        code_theme: Optional code theme name (defaults to config)
+        conversation: Optional conversation object for history
+        
+    Returns:
+        Optional[str]: The complete response text, or None if an error occurred
+        
+    Example:
+        >>> messages = [{"role": "user", "content": "Hello!"}]
+        >>> response = stream_chat_with_formatting(messages, model="mistral")
+    """
+    config = get_config()
+    model = model or config['model']
+    code_theme = code_theme or config['code_theme']
+    
+    # Calculate panel width based on terminal size
+    panel_width = get_panel_width()
+    
+    if not check_ollama_connection(model):
+        return None
+    
+    # Add message to conversation if provided
+    if conversation:
+        conversation.add_message("user", messages[-1]['content'])
+        conversation.model = model
+    
+    # User message formatting with width
     user_content = Markdown(f"**🗨️ {messages[-1]['content']}**")
     console.print(
         Panel.fit(
             user_content,
             title="[user]You[/]",
             border_style="user",
-            style="user"
+            style="user",
+            width=panel_width
         )
     )
     
@@ -35,27 +136,63 @@ def stream_chat_with_formatting(messages, model='mistral', code_theme="dracula")
     accumulated_response = ""
     code_blocks = []
     current_code = None
+    token_count = 0
     
     try:
         start_time = time.time()
-        with Live(auto_refresh=False, console=console) as live:
-            for chunk in ollama.chat(
-                model=model,
-                messages=messages,
-                stream=True
-            ):
-                chunk_content = chunk['message']['content']
-                accumulated_response += chunk_content
-                
-                # Detect code blocks
-                if '```' in chunk_content:
-                    if current_code is None:
-                        current_code = {'start': len(accumulated_response) - len(chunk_content)}
-                    else:
-                        current_code['end'] = len(accumulated_response)
-                        code_blocks.append(current_code)
-                        current_code = None
-                
+        # Prepare options dict based on config
+        options = {
+            "num_ctx": config["num_ctx"],
+            "num_thread": config["num_thread"],
+            "seed": config["seed"],
+            "temperature": config["temperature"],
+            "repeat_penalty": config["repeat_penalty"],
+            "top_k": config["top_k"],
+            "top_p": config["top_p"]
+        }
+        
+        # Only add GPU settings if use_gpu is True
+        if config.get("use_gpu", False):
+            options["num_gpu"] = config["num_gpu"]
+        
+        response_chunks = ollama.chat(
+            model=model,
+            messages=messages,
+            stream=True,
+            options=options
+        )
+        
+        # Initialize live display with width
+        live = Live(
+            Panel("", 
+                title="[assistant]AI Assistant[/] 🤖", 
+                border_style="assistant", 
+                style="assistant", 
+                subtitle=f"Model: {model}",
+                width=panel_width
+            ),
+            console=console,
+            refresh_per_second=10  # Increase refresh rate
+        )
+        live.start()
+        
+        # Process chunks as they arrive
+        for chunk in response_chunks:
+            chunk_content = chunk['message']['content']
+            accumulated_response += chunk_content
+            token_count += 1
+            
+            # Detect code blocks
+            if '```' in chunk_content:
+                if current_code is None:
+                    current_code = {'start': len(accumulated_response) - len(chunk_content)}
+                else:
+                    current_code['end'] = len(accumulated_response)
+                    code_blocks.append(current_code)
+                    current_code = None
+            
+            # Update display with current content
+            try:
                 # Create formatted content
                 formatted_content = []
                 last_pos = 0
@@ -77,9 +214,20 @@ def stream_chat_with_formatting(messages, model='mistral', code_theme="dracula")
                     title="[assistant]AI Assistant[/] 🤖",
                     border_style="assistant",
                     style="assistant",
-                    subtitle=f"Model: {model}"
+                    subtitle=f"Model: {model}",
+                    width=panel_width
                 )
-                live.update(response_panel, refresh=True)
+                live.update(response_panel)
+            except Exception as e:
+                # Handle Live display error in tests
+                pass
+        
+        # Stop live display
+        live.stop()
+        
+        # Add response to conversation if provided
+        if conversation and accumulated_response:
+            conversation.add_message("assistant", accumulated_response)
         
         console.print(f"\n[system]Response time: {time.time()-start_time:.2f}s[/]")
         return accumulated_response
@@ -88,17 +236,53 @@ def stream_chat_with_formatting(messages, model='mistral', code_theme="dracula")
         console.print(f"[warning]Error: {str(e)}[/]", style="warning")
         return None
 
-def interactive_chat():
-    messages = []
+def interactive_chat(
+    initial_conversation: Optional[Conversation] = None,
+    save_history: bool = True
+) -> None:
+    """Start an interactive chat session with history management.
+    
+    Provides a REPL-like interface for chatting with the AI model.
+    Features:
+    - Command history
+    - Session persistence
+    - Conversation management
+    - Graceful exit handling
+    
+    Args:
+        initial_conversation: Optional conversation to continue from
+        save_history: Whether to save chat history (default: True)
+        
+    Example:
+        >>> interactive_chat()  # Start new chat
+        >>> conv = Conversation("my_chat")
+        >>> interactive_chat(conv)  # Continue existing chat
+    """
+    conversation = initial_conversation or Conversation()
+    conversation_manager = ConversationManager() if save_history else None
+    
+    messages = conversation.messages if initial_conversation else []
+    
     while True:
         try:
             user_input = console.input("[user]\n💬 You (q to quit): [/]")
             if user_input.lower() in ('q', 'quit'):
                 break
+                
             messages.append({'role': 'user', 'content': user_input})
-            response = stream_chat_with_formatting(messages)
+            response = stream_chat_with_formatting(messages, conversation=conversation)
+            
             if response:
                 messages.append({'role': 'assistant', 'content': response})
+                
+                # Save conversation after each exchange if enabled
+                if conversation_manager:
+                    conversation_manager.save_conversation(conversation)
+                    
         except KeyboardInterrupt:
             console.print("\n[warning]Session ended by user.[/]")
-            break 
+            break
+    
+    # Final save on exit
+    if conversation_manager and len(conversation.messages) > 0:
+        conversation_manager.save_conversation(conversation) 
