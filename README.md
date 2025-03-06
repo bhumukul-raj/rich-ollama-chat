@@ -72,7 +72,15 @@ rich-ollama-chat
 ```
 
 ### 2. Python API
-You can also use it in your Python code:
+You can use it in your Python code in multiple ways:
+
+#### Method 1: Using the interactive chat
+```python
+from rich_ollama_chat import chat
+chat.interactive_chat()
+```
+
+#### Method 2: Using the streaming chat function
 ```python
 from rich_ollama_chat import stream_chat_with_formatting
 
@@ -84,8 +92,42 @@ response = stream_chat_with_formatting(messages, model="mistral")
 
 The chat interface uses the following default settings:
 - Model: mistral
-- Code theme: dracula
+- Code theme: dracula (default)
 - Custom theme for different message types
+
+### Changing Code Theme
+
+You can change the code theme when using the streaming chat function:
+
+```python
+from rich_ollama_chat import stream_chat_with_formatting
+
+# Example with different code themes
+messages = [{"role": "user", "content": "Show me a Python function"}]
+
+# Using monokai theme
+response = stream_chat_with_formatting(messages, model="mistral", code_theme="monokai")
+
+# Using github-dark theme
+response = stream_chat_with_formatting(messages, model="mistral", code_theme="github-dark")
+
+# Using solarized-dark theme
+response = stream_chat_with_formatting(messages, model="mistral", code_theme="solarized-dark")
+```
+
+Available themes include:
+- `dracula` (default)
+- `monokai`
+- `github-dark`
+- `solarized-dark`
+- `one-dark`
+- `nord`
+- `gruvbox-dark`
+- `vs-dark`
+- `zenburn`
+- And many more supported by Pygments
+
+Note: The theme only affects how code blocks are displayed in the chat.
 
 ## Building the Package
 
