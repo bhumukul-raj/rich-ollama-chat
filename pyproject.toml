@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rich-ollama-chat"
+version = "0.1.0"
+description = "A beautiful terminal-based chat interface for Ollama using Rich formatting"
+readme = "README.md"
+authors = [
+    {name = "Bhumukul Raj", email = "bhumukulraj@gmail.com"}
+]
+license = {file = "LICENSE"}
+requires-python = ">=3.7"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "rich>=13.0.0",
+    "ollama>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/bhumukul-raj/rich-ollama-chat"
+Repository = "https://github.com/bhumukul-raj/rich-ollama-chat.git"
+
+[project.scripts]
+rich-ollama-chat = "rich_ollama_chat.cli:main"
+
+[tool.setuptools]
+packages = ["rich_ollama_chat"] 
