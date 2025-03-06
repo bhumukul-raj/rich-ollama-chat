@@ -91,6 +91,7 @@ def stream_chat_with_formatting(
     - Adaptive width based on terminal size
     - Response time tracking
     - Chat history management
+    - Response interruption (Ctrl+C to stop)
     
     Args:
         messages: List of message dictionaries with 'role' and 'content'
@@ -99,11 +100,8 @@ def stream_chat_with_formatting(
         conversation: Optional conversation object for history
         
     Returns:
-        Optional[str]: The complete response text, or None if an error occurred
-        
-    Example:
-        >>> messages = [{"role": "user", "content": "Hello!"}]
-        >>> response = stream_chat_with_formatting(messages, model="mistral")
+        Optional[str]: The complete response text, or partial text if interrupted,
+                      or None if an error occurred
     """
     config = get_config()
     model = model or config['model']
@@ -137,6 +135,7 @@ def stream_chat_with_formatting(
     code_blocks = []
     current_code = None
     token_count = 0
+    was_interrupted = False
     
     try:
         start_time = time.time()
@@ -177,50 +176,55 @@ def stream_chat_with_formatting(
         live.start()
         
         # Process chunks as they arrive
-        for chunk in response_chunks:
-            chunk_content = chunk['message']['content']
-            accumulated_response += chunk_content
-            token_count += 1
-            
-            # Detect code blocks
-            if '```' in chunk_content:
-                if current_code is None:
-                    current_code = {'start': len(accumulated_response) - len(chunk_content)}
-                else:
-                    current_code['end'] = len(accumulated_response)
-                    code_blocks.append(current_code)
-                    current_code = None
-            
-            # Update display with current content
-            try:
-                # Create formatted content
-                formatted_content = []
-                last_pos = 0
-                for code in code_blocks:
-                    formatted_content.append(Markdown(accumulated_response[last_pos:code['start']]))
-                    code_text = accumulated_response[code['start']:code['end']]
-                    formatted_content.append(Syntax(
-                        code_text.replace('```python', '').replace('```', ''),
-                        "python",
-                        theme=code_theme,
-                        line_numbers=True,
-                        background_color="default"
-                    ))
-                    last_pos = code['end']
-                formatted_content.append(Markdown(accumulated_response[last_pos:]))
+        try:
+            for chunk in response_chunks:
+                chunk_content = chunk['message']['content']
+                accumulated_response += chunk_content
+                token_count += 1
                 
-                response_panel = Panel(
-                    *formatted_content,
-                    title="[assistant]AI Assistant[/] 🤖",
-                    border_style="assistant",
-                    style="assistant",
-                    subtitle=f"Model: {model}",
-                    width=panel_width
-                )
-                live.update(response_panel)
-            except Exception as e:
-                # Handle Live display error in tests
-                pass
+                # Detect code blocks
+                if '```' in chunk_content:
+                    if current_code is None:
+                        current_code = {'start': len(accumulated_response) - len(chunk_content)}
+                    else:
+                        current_code['end'] = len(accumulated_response)
+                        code_blocks.append(current_code)
+                        current_code = None
+                
+                # Update display with current content
+                try:
+                    # Create formatted content
+                    formatted_content = []
+                    last_pos = 0
+                    for code in code_blocks:
+                        formatted_content.append(Markdown(accumulated_response[last_pos:code['start']]))
+                        code_text = accumulated_response[code['start']:code['end']]
+                        formatted_content.append(Syntax(
+                            code_text.replace('```python', '').replace('```', ''),
+                            "python",
+                            theme=code_theme,
+                            line_numbers=True,
+                            background_color="default"
+                        ))
+                        last_pos = code['end']
+                    formatted_content.append(Markdown(accumulated_response[last_pos:]))
+                    
+                    response_panel = Panel(
+                        *formatted_content,
+                        title="[assistant]AI Assistant[/] 🤖",
+                        border_style="assistant",
+                        style="assistant",
+                        subtitle=f"Model: {model}",
+                        width=panel_width
+                    )
+                    live.update(response_panel)
+                except Exception as e:
+                    # Handle Live display error in tests
+                    pass
+                    
+        except KeyboardInterrupt:
+            was_interrupted = True
+            console.print("\n[warning]Response interrupted by user.[/]")
         
         # Stop live display
         live.stop()
@@ -229,7 +233,9 @@ def stream_chat_with_formatting(
         if conversation and accumulated_response:
             conversation.add_message("assistant", accumulated_response)
         
-        console.print(f"\n[system]Response time: {time.time()-start_time:.2f}s[/]")
+        elapsed_time = time.time() - start_time
+        status = "interrupted" if was_interrupted else "completed"
+        console.print(f"\n[system]Response {status} in {elapsed_time:.2f}s[/]")
         return accumulated_response
         
     except Exception as e:
@@ -248,6 +254,8 @@ def interactive_chat(
     - Session persistence
     - Conversation management
     - Graceful exit handling
+    - Response interruption (Ctrl+C to stop current response)
+    - Double Ctrl+C to exit session
     
     Args:
         initial_conversation: Optional conversation to continue from
@@ -263,6 +271,20 @@ def interactive_chat(
     
     messages = conversation.messages if initial_conversation else []
     
+    # Print welcome message with instructions
+    console.print(Panel.fit(
+        "[bold]Welcome to Rich Ollama Chat![/]\n"
+        "- Type your message and press Enter to send\n"
+        "- Press [bold cyan]Ctrl+C[/] to stop the current response\n"
+        "- Press [bold cyan]Ctrl+C twice[/] to exit session\n"
+        "- Type [bold cyan]q[/] or [bold cyan]quit[/] to exit",
+        title="Instructions",
+        border_style="yellow"
+    ))
+    
+    last_interrupt_time = 0
+    DOUBLE_INTERRUPT_THRESHOLD = 1.0  # seconds
+    
     while True:
         try:
             user_input = console.input("[user]\n💬 You (q to quit): [/]")
@@ -270,18 +292,35 @@ def interactive_chat(
                 break
                 
             messages.append({'role': 'user', 'content': user_input})
-            response = stream_chat_with_formatting(messages, conversation=conversation)
-            
-            if response:
-                messages.append({'role': 'assistant', 'content': response})
+            try:
+                response = stream_chat_with_formatting(messages, conversation=conversation)
                 
-                # Save conversation after each exchange if enabled
-                if conversation_manager:
-                    conversation_manager.save_conversation(conversation)
+                if response:
+                    messages.append({'role': 'assistant', 'content': response})
+                    
+                    # Save conversation after each exchange if enabled
+                    if conversation_manager:
+                        conversation_manager.save_conversation(conversation)
+                        
+            except KeyboardInterrupt:
+                # Check if this is a double interrupt
+                current_time = time.time()
+                if current_time - last_interrupt_time < DOUBLE_INTERRUPT_THRESHOLD:
+                    console.print("\n[warning]Session ended by user (double Ctrl+C).[/]")
+                    break
+                last_interrupt_time = current_time
+                console.print("\n[system]Ready for next message...[/]")
+                continue
                     
         except KeyboardInterrupt:
-            console.print("\n[warning]Session ended by user.[/]")
-            break
+            # Check if this is a double interrupt
+            current_time = time.time()
+            if current_time - last_interrupt_time < DOUBLE_INTERRUPT_THRESHOLD:
+                console.print("\n[warning]Session ended by user (double Ctrl+C).[/]")
+                break
+            last_interrupt_time = current_time
+            console.print("\n[system]Ready for next message...[/]")
+            continue
     
     # Final save on exit
     if conversation_manager and len(conversation.messages) > 0:
